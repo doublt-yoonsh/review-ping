@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ReviewPing</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="container">
+    <header class="header">
+      <h1>⚡ ReviewPing</h1>
+    </header>
+
+    <main class="main">
+      <!-- 상태 표시 -->
+      <div id="status" class="status">
+        <div class="status-icon">🔗</div>
+        <div class="status-text">
+          <span id="statusMessage">연결 확인 중...</span>
+        </div>
+      </div>
+
+      <!-- 현재 PR 정보 (PR 페이지에서만 표시) -->
+      <div id="prInfo" class="pr-info hidden">
+        <div class="pr-title" id="prTitle">PR 제목</div>
+        <div class="pr-meta">
+          <span id="prRepo">owner/repo</span>
+          <span id="prNumber">#123</span>
+        </div>
+      </div>
+
+      <!-- 빠른 액션 -->
+      <div class="actions">
+        <button id="openOptions" class="btn btn-secondary">
+          ⚙️ 설정
+        </button>
+      </div>
+
+      <!-- 안내 메시지 -->
+      <div id="guide" class="guide">
+        <p>GitHub PR 페이지에서 버튼을 클릭하여</p>
+        <p>Slack으로 리뷰 요청/완료를 알리세요!</p>
+      </div>
+    </main>
+
+    <footer class="footer">
+      <a href="#" id="githubLink">GitHub</a>
+      <span>•</span>
+      <span>v1.0.0</span>
+    </footer>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

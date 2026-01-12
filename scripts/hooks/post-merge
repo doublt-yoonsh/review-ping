@@ -1,0 +1,28 @@
+#!/bin/bash
+
+# ReviewPing - Git post-merge hook
+# git pull 후 자동 실행되어 확장 프로그램 새로고침 안내
+
+echo ""
+echo "=========================================="
+echo "  ⚡ ReviewPing 업데이트 완료!"
+echo "=========================================="
+echo ""
+echo "  확장 프로그램을 새로고침 해주세요:"
+echo "  1. 열린 chrome://extensions 탭에서 새로고침 클릭"
+echo "  2. GitHub PR 페이지도 새로고침 (F5)"
+echo ""
+echo "=========================================="
+echo ""
+
+# OS별로 chrome://extensions 페이지 열기
+if [[ "$OSTYPE" == "darwin"* ]]; then
+    # macOS
+    open "chrome://extensions" 2>/dev/null || open -a "Google Chrome" "chrome://extensions" 2>/dev/null
+elif [[ "$OSTYPE" == "linux-gnu"* ]]; then
+    # Linux
+    xdg-open "chrome://extensions" 2>/dev/null || google-chrome "chrome://extensions" 2>/dev/null
+elif [[ "$OSTYPE" == "msys" ]] || [[ "$OSTYPE" == "win32" ]]; then
+    # Windows (Git Bash)
+    start "chrome://extensions" 2>/dev/null
+fi

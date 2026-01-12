@@ -1,0 +1,89 @@
+/* ReviewPing - Content Script Styles */
+
+/* Floating 버튼 컨테이너 */
+#reviewping-container {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  z-index: 9999;
+}
+
+.reviewping-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 20px;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 20px;
+  color: #ffffff;
+  background-color: #238636;
+  border: none;
+  border-radius: 12px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(255, 255, 255, 0.1);
+}
+
+.reviewping-btn:hover {
+  background-color: #2ea043;
+  transform: translateY(-2px);
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.15);
+}
+
+.reviewping-btn:active {
+  transform: translateY(0);
+}
+
+.reviewping-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.8;
+  transform: none;
+}
+
+/* 리뷰 완료 버튼 (보라색) */
+.reviewping-btn[data-action="complete"] {
+  background-color: #8957e5;
+}
+
+.reviewping-btn[data-action="complete"]:hover {
+  background-color: #9a6fed;
+}
+
+.reviewping-btn svg {
+  flex-shrink: 0;
+}
+
+/* 상태별 색상 */
+.reviewping-success {
+  background-color: #238636 !important;
+}
+
+.reviewping-error {
+  background-color: #da3633 !important;
+}
+
+/* 로딩 스피너 애니메이션 */
+.reviewping-spinner {
+  animation: reviewping-spin 1s linear infinite;
+}
+
+@keyframes reviewping-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* 다크모드 대응 */
+@media (prefers-color-scheme: light) {
+  .reviewping-btn {
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15), 0 0 0 1px rgba(0, 0, 0, 0.1);
+  }
+
+  .reviewping-btn:hover {
+    box-shadow: 0 6px 16px rgba(0, 0, 0, 0.2), 0 0 0 1px rgba(0, 0, 0, 0.1);
+  }
+}

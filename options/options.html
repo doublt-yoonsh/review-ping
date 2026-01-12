@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ReviewPing 설정</title>
+  <link rel="stylesheet" href="options.css">
+</head>
+<body>
+  <div class="container">
+    <header class="header">
+      <h1>⚡ ReviewPing 설정</h1>
+      <p class="subtitle">GitHub PR 리뷰 알림을 Slack으로 전송합니다</p>
+    </header>
+
+    <main class="main">
+      <!-- Slack 설정 -->
+      <section class="section">
+        <h2>Slack 연동</h2>
+
+        <!-- 연결 방식 탭 -->
+        <div class="connection-tabs">
+          <button type="button" class="tab-btn active" data-tab="bot">Bot Token</button>
+          <button type="button" class="tab-btn" data-tab="webhook">Webhook URL</button>
+        </div>
+
+        <!-- Bot Token 탭 내용 -->
+        <div id="tab-bot" class="tab-content active">
+          <div class="form-group">
+            <label for="botToken">Bot Token</label>
+            <div class="input-with-toggle">
+              <input type="password" id="botToken" placeholder="xoxb-xxxx-xxxx-xxxx">
+              <button type="button" id="toggleBotToken" class="btn-toggle" title="토큰 보기/숨기기">
+                <svg class="icon-eye" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+                  <circle cx="12" cy="12" r="3"></circle>
+                </svg>
+                <svg class="icon-eye-off" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display:none;">
+                  <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"></path>
+                  <line x1="1" y1="1" x2="23" y2="23"></line>
+                </svg>
+              </button>
+            </div>
+            <p id="botTokenHelp" class="help-text">Slack App의 Bot User OAuth Token</p>
+            <div id="botTokenImported" class="token-imported-notice" style="display: none;">
+              <p class="token-imported-status">
+                <svg viewBox="0 0 16 16" fill="currentColor" width="14" height="14">
+                  <path d="M13.78 4.22a.75.75 0 0 1 0 1.06l-7.25 7.25a.75.75 0 0 1-1.06 0L2.22 9.28a.751.751 0 0 1 .018-1.042.751.751 0 0 1 1.042-.018L6 10.94l6.72-6.72a.75.75 0 0 1 1.06 0z"/>
+                </svg>
+                토큰 설정이 완료되었습니다
+              </p>
+              <p class="token-imported-desc">
+                가져오기로 불러온 토큰은 보안을 위해 표시되지 않습니다
+                <button type="button" id="resetBotToken" class="btn-link">새 토큰 입력</button>
+              </p>
+            </div>
+          </div>
+
+          <!-- Bot Token 안내 -->
+          <div class="help-box">
+            <h4>🔑 Bot Token 가져오는 방법</h4>
+            <ol>
+              <li><a href="https://api.slack.com/apps" target="_blank">api.slack.com/apps</a> 접속</li>
+              <li>생성한 App 선택 (없으면 "Create New App" 클릭)</li>
+              <li>왼쪽 메뉴에서 <strong>OAuth & Permissions</strong> 클릭</li>
+              <li><strong>Bot User OAuth Token</strong> 복사 (<code>xoxb-</code>로 시작)</li>
+            </ol>
+            <p class="help-tip">
+              ⚠️ <strong>필수 권한:</strong> <code>chat:write</code>, <code>chat:write.public</code>
+            </p>
+          </div>
+
+          <div class="form-group" style="margin-top: 20px;">
+            <label for="channelId">채널 ID</label>
+            <div class="input-with-button">
+              <input type="text" id="channelId" placeholder="C01ABCD2EFG 또는 채널 링크">
+              <button type="button" id="parseChannelId" class="btn btn-small">파싱</button>
+            </div>
+            <p class="help-text">메시지를 전송할 Slack 채널 ID</p>
+          </div>
+
+          <!-- 채널 ID 안내 -->
+          <div class="help-box">
+            <h4>📢 채널 ID 가져오는 방법</h4>
+            <ol>
+              <li>Slack에서 채널 열기</li>
+              <li>채널 이름 클릭 → 모달 창 열기</li>
+              <li>모달 하단에서 <strong>채널 ID</strong> 복사 (<code>C</code>로 시작)</li>
+            </ol>
+            <p class="help-tip">
+              💡 <strong>Tip:</strong> 채널 링크를 그대로 붙여넣고 "파싱" 버튼을 클릭하세요!<br>
+              <code>https://app.slack.com/client/T.../C01ABCD2EFG</code> → <code>C01ABCD2EFG</code>
+            </p>
+          </div>
+
+          <button type="button" id="testConnection" class="btn btn-secondary" style="margin-top: 16px;">
+            연결 테스트
+          </button>
+          <span id="testResult" class="test-result"></span>
+        </div>
+
+        <!-- Webhook URL 탭 내용 -->
+        <div id="tab-webhook" class="tab-content">
+          <div class="form-group">
+            <label for="webhookUrl">Webhook URL</label>
+            <div class="input-with-toggle">
+              <input type="password" id="webhookUrl" placeholder="https://hooks.slack.com/services/...">
+              <button type="button" id="toggleWebhookUrl" class="btn-toggle" title="URL 보기/숨기기">
+                <svg class="icon-eye" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+                  <circle cx="12" cy="12" r="3"></circle>
+                </svg>
+                <svg class="icon-eye-off" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display:none;">
+                  <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"></path>
+                  <line x1="1" y1="1" x2="23" y2="23"></line>
+                </svg>
+              </button>
+            </div>
+            <p class="help-text">Slack Incoming Webhook URL</p>
+          </div>
+
+          <!-- Webhook URL 안내 -->
+          <div class="help-box">
+            <h4>🔗 Webhook URL 가져오는 방법</h4>
+            <ol>
+              <li><a href="https://api.slack.com/apps" target="_blank">api.slack.com/apps</a> 접속</li>
+              <li>앱 선택 (없으면 "Create New App" 클릭)</li>
+              <li>왼쪽 메뉴에서 <strong>Incoming Webhooks</strong> 클릭</li>
+              <li><strong>Activate Incoming Webhooks</strong> 켜기</li>
+              <li><strong>Add New Webhook to Workspace</strong> 클릭 → 채널 선택</li>
+              <li>생성된 <strong>Webhook URL</strong> 복사</li>
+            </ol>
+            <p class="help-tip">
+              💡 <strong>장점:</strong> URL 하나로 설정 완료! GitHub Actions에서도 같은 URL 사용 가능
+            </p>
+          </div>
+
+          <button type="button" id="testWebhook" class="btn btn-secondary" style="margin-top: 16px;">
+            연결 테스트
+          </button>
+          <span id="testWebhookResult" class="test-result"></span>
+        </div>
+
+        <!-- 저장소별 채널 매핑 -->
+        <div class="channel-mapping-section">
+          <h3>저장소별 채널 매핑 <span class="optional-badge">선택사항</span></h3>
+          <p class="section-desc">저장소마다 다른 채널로 알림을 보내려면 설정하세요. 비어있으면 위의 기본 설정을 사용합니다.</p>
+
+          <div class="mapping-header channel-mapping-header">
+            <span>저장소 (owner/repo 또는 owner/*)</span>
+            <span id="channelMappingValueHeader">채널 ID</span>
+            <span></span>
+          </div>
+
+          <div id="channelMappingList" class="mapping-list">
+            <!-- 동적으로 추가됨 -->
+          </div>
+
+          <button type="button" id="addChannelMapping" class="btn btn-secondary">
+            + 채널 매핑 추가
+          </button>
+        </div>
+      </section>
+
+      <!-- 메시지 템플릿 -->
+      <section class="section">
+        <h2>메시지 템플릿</h2>
+
+        <div class="form-group">
+          <label for="requestTemplate">리뷰 요청 템플릿</label>
+          <textarea id="requestTemplate" rows="4" placeholder="리뷰 요청 메시지 템플릿"></textarea>
+          <p class="help-text">
+            사용 가능한 변수: {pr_title}, {pr_url}, {pr_number}, {author}, {reviewers}, {repo}
+          </p>
+        </div>
+
+        <div class="form-group">
+          <label for="completeTemplate">리뷰 완료 템플릿</label>
+          <textarea id="completeTemplate" rows="4" placeholder="리뷰 완료 메시지 템플릿"></textarea>
+          <p class="help-text">
+            사용 가능한 변수: {pr_title}, {pr_url}, {pr_number}, {author}, {reviewer}, {repo}
+          </p>
+        </div>
+
+        <div class="form-group">
+          <label for="mergeTemplate">
+            머지 완료 템플릿
+            <label class="toggle-switch">
+              <input type="checkbox" id="mergeNotificationEnabled" checked>
+              <span class="toggle-slider"></span>
+            </label>
+          </label>
+          <textarea id="mergeTemplate" rows="4" placeholder="머지 완료 메시지 템플릿"></textarea>
+          <p class="help-text">
+            사용 가능한 변수: {pr_title}, {pr_url}, {pr_number}, {author}, {repo}
+          </p>
+        </div>
+
+        <button type="button" id="resetTemplates" class="btn btn-secondary">
+          기본 템플릿으로 초기화
+        </button>
+      </section>
+
+      <!-- 허용 저장소 설정 -->
+      <section class="section">
+        <h2>허용 저장소</h2>
+        <p class="section-desc">ReviewPing 버튼이 표시될 저장소를 설정합니다. 비어있으면 모든 저장소에서 표시됩니다.</p>
+
+        <div id="allowedReposList" class="allowed-repos-list">
+          <!-- 동적으로 추가됨 -->
+        </div>
+
+        <button type="button" id="addAllowedRepo" class="btn btn-secondary">
+          + 저장소 추가
+        </button>
+
+        <div class="help-box">
+          <h4>📁 저장소 설정 방법</h4>
+          <p class="help-text" style="margin-bottom: 8px;">다음 형식으로 입력할 수 있습니다:</p>
+          <ul class="help-list">
+            <li><code>owner/*</code> — Organization 전체 (예: <code>facebook/*</code>)</li>
+            <li><code>owner/repo</code> — 특정 저장소 (예: <code>facebook/react</code>)</li>
+          </ul>
+          <p class="help-tip">
+            💡 <strong>Tip:</strong> GitHub PR 페이지 URL에서 자동으로 추출됩니다!<br>
+            <code>https://github.com/owner/repo/pull/123</code> 붙여넣기 → <code>owner/repo</code>
+          </p>
+        </div>
+      </section>
+
+      <!-- 사용자 매핑 -->
+      <section class="section">
+        <h2>GitHub ↔ Slack 사용자 매핑</h2>
+        <p class="section-desc">GitHub 사용자명과 Slack 사용자 ID를 매핑하여 멘션이 작동하도록 합니다</p>
+
+        <div class="mapping-header">
+          <span>GitHub Username</span>
+          <span>Slack User ID 또는 프로필 링크</span>
+          <span></span>
+        </div>
+
+        <div id="mappingList" class="mapping-list">
+          <!-- 동적으로 추가됨 -->
+        </div>
+
+        <button type="button" id="addMapping" class="btn btn-secondary">
+          + 매핑 추가
+        </button>
+
+        <!-- Slack User ID 찾기 안내 -->
+        <div class="help-box">
+          <h4>💡 Slack User ID 찾는 방법</h4>
+          <ol>
+            <li>Slack에서 사용자 이름 클릭 → 프로필 열기</li>
+            <li><strong>더보기(⋯)</strong> 버튼 클릭</li>
+            <li><strong>"멤버 ID 복사"</strong> 클릭 → <code>U01ABCD2EFG</code> 형태로 복사됨</li>
+          </ol>
+          <p class="help-tip">
+            💡 <strong>Tip:</strong> 프로필 링크를 그대로 붙여넣어도 자동으로 ID가 추출됩니다!<br>
+            <code>https://app.slack.com/team/U01ABCD2EFG</code> → <code>U01ABCD2EFG</code>
+          </p>
+        </div>
+      </section>
+
+      <!-- 저장 버튼 -->
+      <div class="actions">
+        <button type="button" id="saveSettings" class="btn btn-primary">
+          설정 저장
+        </button>
+        <span id="saveResult" class="save-result"></span>
+      </div>
+
+      <!-- GitHub Slack 앱 안내 -->
+      <section class="section">
+        <h2>PR 생성/머지 알림 받기</h2>
+        <p class="section-desc">리뷰 요청/완료 외에 PR 생성, 머지 등의 알림은 GitHub 공식 Slack 앱을 사용하세요</p>
+
+        <div class="help-box">
+          <h4>🔗 GitHub Slack 앱 연동 방법</h4>
+          <ol>
+            <li>Slack 워크스페이스에 <a href="https://slack.com/apps/A01BP7R4KNY-github" target="_blank">GitHub 앱</a> 설치</li>
+            <li>알림 받을 채널에서 아래 명령어 입력:</li>
+          </ol>
+          <div class="code-block">
+            <code>/github subscribe owner/repo</code>
+          </div>
+          <p class="help-tip">
+            💡 <strong>ReviewPing과 역할 분담:</strong><br>
+            • <strong>ReviewPing</strong>: 리뷰 요청/완료 (멘션으로 실제 알림)<br>
+            • <strong>GitHub Slack 앱</strong>: PR 생성/머지 (채널에 공유)
+          </p>
+        </div>
+      </section>
+
+      <!-- 설정 공유 -->
+      <section class="section">
+        <h2>설정 공유하기</h2>
+        <p class="section-desc">팀원들과 설정을 쉽게 공유할 수 있습니다</p>
+
+        <div class="share-box">
+          <div class="share-export">
+            <h4>📤 내보내기</h4>
+            <p class="share-desc">현재 설정을 암호화된 코드로 복사합니다</p>
+            <label class="checkbox-label">
+              <input type="checkbox" id="includeToken">
+              <span>Bot Token 포함</span>
+              <span class="checkbox-warning">(⚠️ 민감 정보)</span>
+            </label>
+            <button type="button" id="exportSettings" class="btn btn-secondary">
+              설정 복사하기
+            </button>
+            <span id="exportResult" class="export-result"></span>
+          </div>
+
+          <div class="share-import">
+            <h4>📥 가져오기</h4>
+            <p class="share-desc">공유받은 설정 코드를 붙여넣고 가져오기 버튼을 클릭하세요</p>
+            <textarea id="importData" rows="3" placeholder="RP2:x8Kj2mNp4Qr7Yt5Zw..." spellcheck="false"></textarea>
+            <button type="button" id="importSettings" class="btn btn-secondary">
+              설정 가져오기
+            </button>
+            <span id="importResult" class="import-result"></span>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <p>ReviewPing v1.0.0</p>
+    </footer>
+  </div>
+
+  <script src="options.js"></script>
+</body>
+</html>
