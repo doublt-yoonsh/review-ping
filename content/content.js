@@ -422,7 +422,101 @@
     }, 3000);
   }
 
-  // 모달 생성 및 표시
+  // 리뷰 완료 확인 모달
+  function showReviewCompleteModal(prInfo, onConfirm) {
+    // 기존 모달 제거
+    const existingModal = document.getElementById('reviewping-modal');
+    if (existingModal) existingModal.remove();
+
+    const modal = document.createElement('div');
+    modal.id = 'reviewping-modal';
+    modal.style.cssText = `
+      position: fixed !important;
+      top: 0 !important;
+      left: 0 !important;
+      right: 0 !important;
+      bottom: 0 !important;
+      z-index: 2147483647 !important;
+      display: flex !important;
+      align-items: center !important;
+      justify-content: center !important;
+      background-color: rgba(0, 0, 0, 0.5) !important;
+    `;
+
+    const modalContent = document.createElement('div');
+    modalContent.style.cssText = `
+      background-color: #161b22 !important;
+      border: 1px solid #30363d !important;
+      border-radius: 12px !important;
+      padding: 24px !important;
+      min-width: 320px !important;
+      max-width: 480px !important;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4) !important;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important;
+    `;
+
+    modalContent.innerHTML = `
+      <h3 style="color: #f0f6fc; font-size: 16px; font-weight: 600; margin: 0 0 16px 0;">리뷰 완료</h3>
+      <p style="color: #c9d1d9; font-size: 14px; margin-bottom: 12px;">
+        <strong style="color: #8957e5;">${prInfo.author}</strong> 님께 리뷰 완료 알림을 보냅니다.
+      </p>
+      <p style="color: #8b949e; font-size: 12px; margin: 12px 0 20px 0; padding: 8px 12px; background-color: #0d1117; border-radius: 6px;">
+        📋 ${prInfo.title}
+      </p>
+      <div style="display: flex; gap: 12px; justify-content: flex-end;">
+        <button id="reviewping-modal-cancel" style="
+          padding: 8px 16px;
+          font-size: 14px;
+          font-weight: 500;
+          color: #c9d1d9;
+          background-color: #21262d;
+          border: 1px solid #30363d;
+          border-radius: 6px;
+          cursor: pointer;
+        ">취소</button>
+        <button id="reviewping-modal-confirm" style="
+          padding: 8px 16px;
+          font-size: 14px;
+          font-weight: 500;
+          color: #ffffff;
+          background-color: #8957e5;
+          border: none;
+          border-radius: 6px;
+          cursor: pointer;
+        ">보내기</button>
+      </div>
+    `;
+
+    modal.appendChild(modalContent);
+    document.body.appendChild(modal);
+
+    // 취소 버튼
+    document.getElementById('reviewping-modal-cancel').addEventListener('click', () => {
+      modal.remove();
+    });
+
+    // 배경 클릭 시 닫기
+    modal.addEventListener('click', (e) => {
+      if (e.target === modal) modal.remove();
+    });
+
+    // ESC 키로 닫기
+    const escHandler = (e) => {
+      if (e.key === 'Escape') {
+        modal.remove();
+        document.removeEventListener('keydown', escHandler);
+      }
+    };
+    document.addEventListener('keydown', escHandler);
+
+    // 확인 버튼
+    document.getElementById('reviewping-modal-confirm').addEventListener('click', () => {
+      modal.remove();
+      onConfirm();
+    });
+  }
+
+  // 리뷰 요청 모달 생성 및 표시
   async function showReviewRequestModal(prInfo, onConfirm) {
     // 기존 모달 제거
     const existingModal = document.getElementById('reviewping-modal');
@@ -795,8 +889,10 @@
         sendSlackNotification(updatedPrInfo, action);
       });
     } else {
-      // 리뷰 완료: 바로 전송
-      sendSlackNotification(prInfo, action);
+      // 리뷰 완료: 확인 모달 표시
+      showReviewCompleteModal(prInfo, () => {
+        sendSlackNotification(prInfo, action);
+      });
     }
   }
 
