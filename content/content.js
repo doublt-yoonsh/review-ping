@@ -543,6 +543,11 @@
     // 선택된 리뷰어 추적
     let selectedReviewers = hasReviewers ? [...reviewers] : [];
 
+    // GitHub 리뷰어 추가 설정 가져오기
+    const settings = await chrome.storage.sync.get({ githubToken: '', autoAddReviewers: true });
+    const hasGithubToken = !!settings.githubToken;
+    let addToGithub = hasGithubToken && settings.autoAddReviewers;
+
     const modal = document.createElement('div');
     modal.id = 'reviewping-modal';
     modal.style.cssText = `
@@ -606,6 +611,15 @@
       ? `<p style="color: #d29922; font-size: 13px;">리뷰어가 지정되지 않았습니다. "팀원분들"에게 요청됩니다.</p>`
       : '';
 
+    // GitHub에 리뷰어 추가 체크박스 (토큰이 있고, 히스토리/타임라인에서 선택 가능한 경우만)
+    const showGithubCheckbox = hasGithubToken && !hasReviewers && (historyReviewers.length > 0 || timelineReviewers.length > 0);
+    const githubCheckboxHTML = showGithubCheckbox
+      ? `<label class="reviewping-github-checkbox" style="display: flex; align-items: center; gap: 8px; margin-top: 12px; cursor: pointer;">
+          <input type="checkbox" id="reviewping-add-to-github" ${addToGithub ? 'checked' : ''} style="width: 16px; height: 16px; cursor: pointer;">
+          <span style="color: #8b949e; font-size: 13px;">GitHub PR에도 리뷰어 추가</span>
+        </label>`
+      : '';
+
     const modalContent = document.createElement('div');
     modalContent.style.cssText = `
       background-color: #161b22 !important;
@@ -631,6 +645,7 @@
       ${historyHTML}
       ${timelineHTML}
       ${noReviewerWarning}
+      ${githubCheckboxHTML}
       <p style="color: #8b949e; font-size: 12px; margin: 12px 0 20px 0; padding: 8px 12px; background-color: #0d1117; border-radius: 6px;">
         📋 ${prInfo.title}
       </p>
@@ -729,8 +744,37 @@
     document.addEventListener('keydown', escHandler);
 
     // 확인 버튼
-    document.getElementById('reviewping-modal-confirm').addEventListener('click', () => {
+    document.getElementById('reviewping-modal-confirm').addEventListener('click', async () => {
+      // GitHub 체크박스 상태 확인
+      const githubCheckbox = document.getElementById('reviewping-add-to-github');
+      const shouldAddToGithub = githubCheckbox && githubCheckbox.checked;
+
       modal.remove();
+
+      // GitHub에 리뷰어 추가 (히스토리/타임라인에서 선택한 경우만)
+      if (shouldAddToGithub && selectedReviewers.length > 0 && !hasReviewers) {
+        try {
+          const result = await new Promise((resolve) => {
+            chrome.runtime.sendMessage({
+              type: 'ADD_GITHUB_REVIEWERS',
+              payload: {
+                prInfo,
+                reviewers: selectedReviewers
+              }
+            }, resolve);
+          });
+
+          if (result && result.success) {
+            console.log('[ReviewPing] GitHub reviewers added successfully');
+          } else {
+            console.warn('[ReviewPing] Failed to add GitHub reviewers:', result?.error);
+            // GitHub 추가 실패해도 Slack 알림은 계속 진행
+          }
+        } catch (error) {
+          console.error('[ReviewPing] Error adding GitHub reviewers:', error);
+        }
+      }
+
       // 선택된 리뷰어로 prInfo 업데이트
       const updatedPrInfo = { ...prInfo, reviewers: selectedReviewers };
       onConfirm(updatedPrInfo);

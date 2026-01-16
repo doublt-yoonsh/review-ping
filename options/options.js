@@ -38,6 +38,10 @@ const elements = {
   channelMappingList: document.getElementById('channelMappingList'),
   channelMappingValueHeader: document.getElementById('channelMappingValueHeader'),
   addChannelMapping: document.getElementById('addChannelMapping'),
+  // GitHub 관련
+  githubToken: document.getElementById('githubToken'),
+  toggleGithubToken: document.getElementById('toggleGithubToken'),
+  autoAddReviewers: document.getElementById('autoAddReviewers'),
   // 템플릿 관련
   requestTemplate: document.getElementById('requestTemplate'),
   completeTemplate: document.getElementById('completeTemplate'),
@@ -349,6 +353,8 @@ async function loadSettings() {
     channelId: '',
     webhookUrl: '',
     channelMappings: [],
+    githubToken: '',
+    autoAddReviewers: true,
     requestTemplate: DEFAULT_TEMPLATES.request,
     completeTemplate: DEFAULT_TEMPLATES.complete,
     mergeTemplate: DEFAULT_TEMPLATES.merge,
@@ -396,6 +402,8 @@ async function loadSettings() {
 
   elements.channelId.value = settings.channelId || '';
   elements.webhookUrl.value = settings.webhookUrl || '';
+  elements.githubToken.value = settings.githubToken || '';
+  elements.autoAddReviewers.checked = settings.autoAddReviewers !== false;
   elements.requestTemplate.value = settings.requestTemplate || DEFAULT_TEMPLATES.request;
   elements.completeTemplate.value = settings.completeTemplate || DEFAULT_TEMPLATES.complete;
   elements.mergeTemplate.value = settings.mergeTemplate || DEFAULT_TEMPLATES.merge;
@@ -647,6 +655,8 @@ async function saveSettings() {
     channelId: elements.channelId.value.trim(),
     webhookUrl: elements.webhookUrl.value.trim(),
     channelMappings: collectChannelMappings(),
+    githubToken: elements.githubToken.value.trim(),
+    autoAddReviewers: elements.autoAddReviewers.checked,
     requestTemplate: elements.requestTemplate.value || DEFAULT_TEMPLATES.request,
     completeTemplate: elements.completeTemplate.value || DEFAULT_TEMPLATES.complete,
     mergeTemplate: elements.mergeTemplate.value || DEFAULT_TEMPLATES.merge,
@@ -966,6 +976,24 @@ function toggleBotTokenVisibility() {
   }
 }
 
+// GitHub Token 보기/숨기기 토글
+function toggleGithubTokenVisibility() {
+  const input = elements.githubToken;
+  const button = elements.toggleGithubToken;
+  const iconEye = button.querySelector('.icon-eye');
+  const iconEyeOff = button.querySelector('.icon-eye-off');
+
+  if (input.type === 'password') {
+    input.type = 'text';
+    iconEye.style.display = 'none';
+    iconEyeOff.style.display = 'block';
+  } else {
+    input.type = 'password';
+    iconEye.style.display = 'block';
+    iconEyeOff.style.display = 'none';
+  }
+}
+
 // 새 토큰 입력 버튼 클릭 시 imported 상태 해제
 elements.resetBotToken.addEventListener('click', async () => {
   // storage에서 기존 토큰 삭제
@@ -987,6 +1015,7 @@ elements.resetBotToken.addEventListener('click', async () => {
 // 이벤트 리스너
 elements.toggleBotToken.addEventListener('click', toggleBotTokenVisibility);
 elements.toggleWebhookUrl.addEventListener('click', toggleWebhookUrlVisibility);
+elements.toggleGithubToken.addEventListener('click', toggleGithubTokenVisibility);
 elements.testConnection.addEventListener('click', testConnection);
 elements.testWebhook.addEventListener('click', testWebhookConnection);
 elements.saveSettings.addEventListener('click', saveSettings);

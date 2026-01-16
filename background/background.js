@@ -21,6 +21,8 @@ async function getSettings() {
     channelId: '',
     webhookUrl: '',
     channelMappings: [],
+    githubToken: '',
+    autoAddReviewers: true,
     requestTemplate: DEFAULT_TEMPLATES.request,
     completeTemplate: DEFAULT_TEMPLATES.complete,
     mergeTemplate: DEFAULT_TEMPLATES.merge,
@@ -331,7 +333,88 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
     return true;
   }
+
+  if (request.type === 'ADD_GITHUB_REVIEWERS') {
+    const { prInfo, reviewers } = request.payload;
+
+    addGitHubReviewers(prInfo, reviewers)
+      .then(result => sendResponse(result))
+      .catch(error => sendResponse({ success: false, error: error.message }));
+
+    return true;
+  }
 });
+
+// GitHub API - PR에 리뷰어 추가
+async function addGitHubReviewers(prInfo, reviewers) {
+  const settings = await getSettings();
+
+  if (!settings.githubToken) {
+    return {
+      success: false,
+      error: 'GitHub Token이 설정되지 않았습니다'
+    };
+  }
+
+  if (!reviewers || reviewers.length === 0) {
+    return {
+      success: false,
+      error: '추가할 리뷰어가 없습니다'
+    };
+  }
+
+  const { owner, repo, prNumber } = prInfo;
+
+  try {
+    const response = await fetch(
+      `https://api.github.com/repos/${owner}/${repo}/pulls/${prNumber}/requested_reviewers`,
+      {
+        method: 'POST',
+        headers: {
+          'Authorization': `token ${settings.githubToken}`,
+          'Accept': 'application/vnd.github.v3+json',
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          reviewers: reviewers
+        })
+      }
+    );
+
+    if (response.ok) {
+      const data = await response.json();
+      console.log('[ReviewPing] GitHub reviewers added:', data.requested_reviewers?.map(r => r.login));
+      return { success: true };
+    } else {
+      const errorData = await response.json();
+      console.error('[ReviewPing] GitHub API Error:', response.status, errorData);
+
+      // 에러 메시지 처리
+      let errorMsg = errorData.message || `API 오류 (${response.status})`;
+      if (response.status === 401) {
+        errorMsg = 'GitHub Token이 유효하지 않습니다';
+      } else if (response.status === 403) {
+        errorMsg = 'GitHub 권한이 부족합니다 (repo 권한 필요)';
+      } else if (response.status === 404) {
+        errorMsg = 'PR을 찾을 수 없거나 접근 권한이 없습니다';
+      } else if (response.status === 422) {
+        // 이미 리뷰어인 경우 등
+        errorMsg = errorData.message || '리뷰어를 추가할 수 없습니다';
+      }
+
+      return {
+        success: false,
+        error: errorMsg
+      };
+    }
+  } catch (error) {
+    console.error('[ReviewPing] GitHub API Network Error:', error);
+    return {
+      success: false,
+      error: '네트워크 오류'
+    };
+  }
+}
 
 // Webhook 테스트
 async function testWebhook(webhookUrl) {
