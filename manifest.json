@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "ReviewPing",
-  "version": "1.0.0",
+  "version": "1.2.0",
   "description": "GitHub PR 페이지에서 원클릭으로 Slack에 리뷰 요청/완료 알림을 보내는 확장 프로그램",
   "permissions": [
     "storage",

@@ -162,49 +162,26 @@
         </div>
       </section>
 
-      <!-- GitHub 설정 -->
+      <!-- GitHub 리뷰어 자동 추가 설정 -->
       <section class="section">
-        <h2>GitHub 연동 <span class="optional-badge">선택사항</span></h2>
-        <p class="section-desc">리뷰 요청 시 GitHub PR에도 리뷰어를 자동으로 추가하려면 설정하세요</p>
+        <h2>GitHub 리뷰어 자동 추가</h2>
+        <p class="section-desc">리뷰 요청 시 GitHub PR에도 리뷰어를 자동으로 추가합니다</p>
 
-        <div class="form-group">
-          <label for="githubToken">Personal Access Token</label>
-          <div class="input-with-toggle">
-            <input type="password" id="githubToken" placeholder="ghp_xxxxxxxxxxxxxxxxxxxx">
-            <button type="button" id="toggleGithubToken" class="btn-toggle" title="토큰 보기/숨기기">
-              <svg class="icon-eye" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
-                <circle cx="12" cy="12" r="3"></circle>
-              </svg>
-              <svg class="icon-eye-off" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display:none;">
-                <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"></path>
-                <line x1="1" y1="1" x2="23" y2="23"></line>
-              </svg>
-            </button>
-          </div>
-          <p class="help-text">GitHub Personal Access Token (Classic)</p>
-        </div>
-
-        <!-- GitHub Token 안내 -->
-        <div class="help-box">
-          <h4>🔑 GitHub Token 가져오는 방법</h4>
-          <ol>
-            <li><a href="https://github.com/settings/tokens" target="_blank">github.com/settings/tokens</a> 접속</li>
-            <li><strong>Generate new token (classic)</strong> 클릭</li>
-            <li>Note에 "ReviewPing" 입력</li>
-            <li><strong>repo</strong> 권한 체크 (또는 최소 <code>public_repo</code>)</li>
-            <li><strong>Generate token</strong> 클릭 후 복사</li>
-          </ol>
-          <p class="help-tip">
-            ⚠️ <strong>필수 권한:</strong> <code>repo</code> (private repo) 또는 <code>public_repo</code> (public repo만)
-          </p>
-        </div>
-
-        <label class="checkbox-label" style="margin-top: 16px;">
+        <label class="checkbox-label">
           <input type="checkbox" id="autoAddReviewers" checked>
           <span>리뷰 요청 시 GitHub PR에 리뷰어 자동 추가</span>
         </label>
         <p class="help-text" style="margin-left: 24px;">활성화하면 선택한 리뷰어가 GitHub PR의 Reviewers에도 추가됩니다</p>
+
+        <div class="help-box" style="margin-top: 16px;">
+          <h4>💡 작동 방식</h4>
+          <p class="help-text" style="margin-bottom: 8px;">
+            GitHub에 로그인되어 있으면 별도 토큰 설정 없이 자동으로 리뷰어가 추가됩니다.
+          </p>
+          <p class="help-tip">
+            ✅ <strong>추가 설정 불필요:</strong> GitHub 로그인 세션을 사용하여 리뷰어를 추가합니다
+          </p>
+        </div>
       </section>
 
       <!-- 메시지 템플릿 -->
@@ -371,7 +348,7 @@
     </main>
 
     <footer class="footer">
-      <p>ReviewPing v1.0.0</p>
+      <p>ReviewPing <span id="version"></span></p>
     </footer>
   </div>
 

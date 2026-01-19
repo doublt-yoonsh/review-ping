@@ -53,6 +53,117 @@
     });
   }
 
+  // ========== 세션 기반 GitHub 리뷰어 추가 ==========
+
+  // CSRF 토큰 추출
+  function getCSRFToken() {
+    // meta 태그에서 추출
+    const metaToken = document.querySelector('meta[name="csrf-token"]');
+    if (metaToken) {
+      return metaToken.getAttribute('content');
+    }
+
+    // form의 hidden input에서 추출
+    const inputToken = document.querySelector('input[name="authenticity_token"]');
+    if (inputToken) {
+      return inputToken.value;
+    }
+
+    return null;
+  }
+
+  // GitHub username -> user ID 변환 (캐시 사용)
+  const userIdCache = new Map();
+
+  async function getUserId(username) {
+    // 캐시 확인
+    if (userIdCache.has(username)) {
+      return userIdCache.get(username);
+    }
+
+    try {
+      // GitHub API는 인증 없이도 사용자 정보 조회 가능
+      const response = await fetch(`https://api.github.com/users/${username}`, {
+        headers: {
+          'Accept': 'application/vnd.github.v3+json'
+        }
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        userIdCache.set(username, data.id);
+        return data.id;
+      }
+    } catch (error) {
+      console.error('[ReviewPing] Error fetching user ID:', error);
+    }
+
+    return null;
+  }
+
+  // 세션 기반으로 리뷰어 추가
+  async function addReviewersViaSession(prInfo, reviewers) {
+    const csrfToken = getCSRFToken();
+    if (!csrfToken) {
+      console.error('[ReviewPing] CSRF token not found');
+      return { success: false, error: 'CSRF 토큰을 찾을 수 없습니다' };
+    }
+
+    const { owner, repo, prNumber } = prInfo;
+
+    // 각 리뷰어의 user ID 가져오기
+    const userIds = await Promise.all(
+      reviewers.map(async (username) => {
+        const id = await getUserId(username);
+        return { username, id };
+      })
+    );
+
+    // ID를 가져오지 못한 사용자 필터링
+    const validUsers = userIds.filter(u => u.id !== null);
+
+    if (validUsers.length === 0) {
+      return { success: false, error: '리뷰어 정보를 가져올 수 없습니다' };
+    }
+
+    // FormData 생성
+    const formData = new FormData();
+    formData.append('authenticity_token', csrfToken);
+    formData.append('partial_last_updated', Math.floor(Date.now() / 1000).toString());
+    formData.append('dummy-field-just-to-avoid-empty-submit', 'foo');
+
+    // 각 리뷰어 ID 추가
+    validUsers.forEach(user => {
+      formData.append('reviewer_user_ids[]', user.id.toString());
+    });
+
+    try {
+      const response = await fetch(
+        `https://github.com/${owner}/${repo}/pull/${prNumber}/review-requests`,
+        {
+          method: 'POST',
+          body: formData,
+          headers: {
+            'Accept': 'text/html',
+            'X-Requested-With': 'XMLHttpRequest'
+          },
+          credentials: 'include' // 세션 쿠키 포함
+        }
+      );
+
+      if (response.ok) {
+        console.log('[ReviewPing] Reviewers added via session:', validUsers.map(u => u.username));
+        return { success: true, addedReviewers: validUsers.map(u => u.username) };
+      } else {
+        console.error('[ReviewPing] Failed to add reviewers:', response.status);
+        return { success: false, error: `요청 실패 (${response.status})` };
+      }
+    } catch (error) {
+      console.error('[ReviewPing] Error adding reviewers via session:', error);
+      return { success: false, error: '네트워크 오류' };
+    }
+  }
+
   // 이전 PR 상태 추적 (머지 감지용)
   let previousMergeState = false;
 
@@ -544,9 +655,10 @@
     let selectedReviewers = hasReviewers ? [...reviewers] : [];
 
     // GitHub 리뷰어 추가 설정 가져오기
-    const settings = await chrome.storage.sync.get({ githubToken: '', autoAddReviewers: true });
-    const hasGithubToken = !!settings.githubToken;
-    let addToGithub = hasGithubToken && settings.autoAddReviewers;
+    const settings = await chrome.storage.sync.get({ autoAddReviewers: true });
+    // 세션 기반 방식은 항상 사용 가능 (로그인 되어있으면)
+    const isLoggedIn = !!document.querySelector('meta[name="user-login"]')?.getAttribute('content');
+    let addToGithub = isLoggedIn && settings.autoAddReviewers;
 
     const modal = document.createElement('div');
     modal.id = 'reviewping-modal';
@@ -611,8 +723,8 @@
       ? `<p style="color: #d29922; font-size: 13px;">리뷰어가 지정되지 않았습니다. "팀원분들"에게 요청됩니다.</p>`
       : '';
 
-    // GitHub에 리뷰어 추가 체크박스 (토큰이 있고, 히스토리/타임라인에서 선택 가능한 경우만)
-    const showGithubCheckbox = hasGithubToken && !hasReviewers && (historyReviewers.length > 0 || timelineReviewers.length > 0);
+    // GitHub에 리뷰어 추가 체크박스 (로그인 되어있고, 히스토리/타임라인에서 선택 가능한 경우만)
+    const showGithubCheckbox = isLoggedIn && !hasReviewers && (historyReviewers.length > 0 || timelineReviewers.length > 0);
     const githubCheckboxHTML = showGithubCheckbox
       ? `<label class="reviewping-github-checkbox" style="display: flex; align-items: center; gap: 8px; margin-top: 12px; cursor: pointer;">
           <input type="checkbox" id="reviewping-add-to-github" ${addToGithub ? 'checked' : ''} style="width: 16px; height: 16px; cursor: pointer;">
@@ -751,23 +863,15 @@
 
       modal.remove();
 
-      // GitHub에 리뷰어 추가 (히스토리/타임라인에서 선택한 경우만)
+      // GitHub에 리뷰어 추가 (세션 기반 - 히스토리/타임라인에서 선택한 경우만)
       if (shouldAddToGithub && selectedReviewers.length > 0 && !hasReviewers) {
         try {
-          const result = await new Promise((resolve) => {
-            chrome.runtime.sendMessage({
-              type: 'ADD_GITHUB_REVIEWERS',
-              payload: {
-                prInfo,
-                reviewers: selectedReviewers
-              }
-            }, resolve);
-          });
+          const result = await addReviewersViaSession(prInfo, selectedReviewers);
 
-          if (result && result.success) {
-            console.log('[ReviewPing] GitHub reviewers added successfully');
+          if (result.success) {
+            console.log('[ReviewPing] GitHub reviewers added via session:', result.addedReviewers);
           } else {
-            console.warn('[ReviewPing] Failed to add GitHub reviewers:', result?.error);
+            console.warn('[ReviewPing] Failed to add GitHub reviewers:', result.error);
             // GitHub 추가 실패해도 Slack 알림은 계속 진행
           }
         } catch (error) {

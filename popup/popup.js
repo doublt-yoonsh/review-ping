@@ -52,6 +52,9 @@ elements.openOptions.addEventListener('click', () => {
   chrome.runtime.openOptionsPage();
 });
 
+// 버전 표시
+document.getElementById('version').textContent = `v${chrome.runtime.getManifest().version}`;
+
 // 초기화
 checkSettings();
 checkCurrentTab();
