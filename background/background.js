@@ -335,9 +335,9 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   }
 
   if (request.type === 'ADD_GITHUB_REVIEWERS') {
-    const { prInfo, reviewers } = request.payload;
+    const { owner, repo, prNumber, reviewers } = request.payload;
 
-    addGitHubReviewers(prInfo, reviewers)
+    addGitHubReviewers({ owner, repo, prNumber }, reviewers)
       .then(result => sendResponse(result))
       .catch(error => sendResponse({ success: false, error: error.message }));
 
@@ -350,9 +350,10 @@ async function addGitHubReviewers(prInfo, reviewers) {
   const settings = await getSettings();
 
   if (!settings.githubToken) {
+    console.log('[ReviewPing] No GitHub token configured, skipping API call');
     return {
       success: false,
-      error: 'GitHub Token이 설정되지 않았습니다'
+      error: 'NO_TOKEN'
     };
   }
 

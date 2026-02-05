@@ -101,15 +101,76 @@
     return null;
   }
 
-  // 세션 기반으로 리뷰어 추가
+  // GitHub에 리뷰어 추가 (API 사용)
   async function addReviewersViaSession(prInfo, reviewers) {
-    const csrfToken = getCSRFToken();
-    if (!csrfToken) {
-      console.error('[ReviewPing] CSRF token not found');
-      return { success: false, error: 'CSRF 토큰을 찾을 수 없습니다' };
-    }
+    console.log('[ReviewPing] addReviewersViaSession called with:', { prNumber: prInfo.prNumber, reviewers });
 
     const { owner, repo, prNumber } = prInfo;
+
+    // background script를 통해 GitHub API 호출
+    const apiResult = await new Promise((resolve) => {
+      chrome.runtime.sendMessage({
+        type: 'ADD_GITHUB_REVIEWERS',
+        payload: { owner, repo, prNumber, reviewers }
+      }, (response) => {
+        console.log('[ReviewPing] GitHub API response:', response);
+        resolve(response || { success: false, error: 'No response from background' });
+      });
+    });
+
+    if (apiResult.success) {
+      return { success: true, addedReviewers: reviewers };
+    }
+
+    // API 실패 시 세션 기반 fallback 시도 (이미 로그인된 상태 활용)
+    console.log('[ReviewPing] GitHub API failed, trying session-based fallback...', apiResult.error);
+    return await addReviewersViaSessionFallback(prInfo, reviewers);
+  }
+
+  // 세션 기반 리뷰어 추가 (fallback) - GitHub 내부 API 사용
+  async function addReviewersViaSessionFallback(prInfo, reviewers) {
+    const { owner, repo, prNumber } = prInfo;
+
+    console.log('[ReviewPing] addReviewersViaSessionFallback called:', { owner, repo, prNumber, reviewers });
+
+    // 방법 1: GraphQL API 시도 (GitHub의 내부 GraphQL 사용)
+    console.log('[ReviewPing] Trying method 1: GraphQL...');
+    const graphqlResult = await tryGraphQLReviewerAdd(owner, repo, prNumber, reviewers);
+    console.log('[ReviewPing] GraphQL result:', graphqlResult);
+    if (graphqlResult.success) {
+      return graphqlResult;
+    }
+
+    // 방법 2: GitHub 내부 REST API (form submission 모방)
+    console.log('[ReviewPing] Trying method 2: REST API...');
+    const restResult = await tryRestAPIReviewerAdd(owner, repo, prNumber, reviewers);
+    console.log('[ReviewPing] REST API result:', restResult);
+    if (restResult.success) {
+      return restResult;
+    }
+
+    // 방법 3: GitHub의 reviewer sidebar 클릭 시뮬레이션
+    console.log('[ReviewPing] Trying method 3: Click simulation...');
+    const clickResult = await tryClickBasedReviewerAdd(reviewers);
+    console.log('[ReviewPing] Click result:', clickResult);
+    if (clickResult.success) {
+      return clickResult;
+    }
+
+    // 모든 방법 실패
+    console.log('[ReviewPing] All session methods failed');
+    return {
+      success: false,
+      error: 'GitHub Token을 설정하면 더 안정적으로 동작합니다'
+    };
+  }
+
+  // GitHub 내부 REST API를 통한 리뷰어 추가
+  async function tryRestAPIReviewerAdd(owner, repo, prNumber, reviewers) {
+    const csrfToken = getCSRFToken();
+    if (!csrfToken) {
+      return { success: false, error: 'CSRF token not found' };
+    }
 
     // 각 리뷰어의 user ID 가져오기
     const userIds = await Promise.all(
@@ -119,49 +180,370 @@
       })
     );
 
-    // ID를 가져오지 못한 사용자 필터링
     const validUsers = userIds.filter(u => u.id !== null);
-
     if (validUsers.length === 0) {
       return { success: false, error: '리뷰어 정보를 가져올 수 없습니다' };
     }
 
-    // FormData 생성
-    const formData = new FormData();
-    formData.append('authenticity_token', csrfToken);
-    formData.append('partial_last_updated', Math.floor(Date.now() / 1000).toString());
-    formData.append('dummy-field-just-to-avoid-empty-submit', 'foo');
+    console.log('[ReviewPing] Valid users for REST API:', validUsers);
 
-    // 각 리뷰어 ID 추가
-    validUsers.forEach(user => {
-      formData.append('reviewer_user_ids[]', user.id.toString());
-    });
-
-    try {
-      const response = await fetch(
-        `https://github.com/${owner}/${repo}/pull/${prNumber}/review-requests`,
-        {
+    // 각 리뷰어를 개별적으로 추가 (GitHub UI 동작 방식)
+    let addedCount = 0;
+    for (const user of validUsers) {
+      try {
+        // GitHub UI가 실제로 사용하는 엔드포인트와 형식
+        const response = await fetch(`https://github.com/${owner}/${repo}/pull/${prNumber}/reviewers`, {
           method: 'POST',
-          body: formData,
           headers: {
-            'Accept': 'text/html',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            'Content-Type': 'application/x-www-form-urlencoded',
             'X-Requested-With': 'XMLHttpRequest'
           },
-          credentials: 'include' // 세션 쿠키 포함
+          credentials: 'include',
+          body: new URLSearchParams({
+            'authenticity_token': csrfToken,
+            'reviewer_user_id': user.id.toString()
+          }).toString()
+        });
+
+        console.log('[ReviewPing] REST API response for', user.username, ':', response.status);
+
+        if (response.ok || response.status === 200 || response.status === 422) {
+          addedCount++;
         }
+      } catch (error) {
+        console.log('[ReviewPing] REST API error for', user.username, ':', error.message);
+      }
+    }
+
+    if (addedCount > 0) {
+      return { success: true, addedReviewers: validUsers.slice(0, addedCount).map(u => u.username) };
+    }
+
+    return { success: false, error: 'REST API failed' };
+  }
+
+  // GraphQL API를 통한 리뷰어 추가 시도
+  async function tryGraphQLReviewerAdd(owner, repo, prNumber, reviewers) {
+    console.log('[ReviewPing] Trying GraphQL reviewer add...');
+
+    // PR의 node ID를 GraphQL로 조회
+    const prNodeId = await getPRNodeIdViaGraphQL(owner, repo, prNumber);
+    if (!prNodeId) {
+      console.log('[ReviewPing] Could not get PR node ID');
+      return { success: false, error: 'PR node ID not found' };
+    }
+
+    console.log('[ReviewPing] Got PR node ID:', prNodeId);
+
+    // 리뷰어들의 node ID 가져오기
+    const reviewerNodeIds = await Promise.all(
+      reviewers.map(async (username) => {
+        const nodeId = await getUserNodeId(username);
+        return { username, nodeId };
+      })
+    );
+
+    const validReviewers = reviewerNodeIds.filter(r => r.nodeId);
+    console.log('[ReviewPing] Valid reviewers with node IDs:', validReviewers);
+
+    if (validReviewers.length === 0) {
+      return { success: false, error: 'No valid reviewer node IDs' };
+    }
+
+    try {
+      const response = await fetch('https://github.com/graphql', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json'
+        },
+        credentials: 'include',
+        body: JSON.stringify({
+          query: `
+            mutation RequestReviews($pullRequestId: ID!, $userIds: [ID!]!) {
+              requestReviews(input: {pullRequestId: $pullRequestId, userIds: $userIds}) {
+                pullRequest {
+                  id
+                }
+              }
+            }
+          `,
+          variables: {
+            pullRequestId: prNodeId,
+            userIds: validReviewers.map(r => r.nodeId)
+          }
+        })
+      });
+
+      const result = await response.json();
+      console.log('[ReviewPing] GraphQL mutation response:', result);
+
+      if (result.data && result.data.requestReviews && !result.errors) {
+        return { success: true, addedReviewers: validReviewers.map(r => r.username) };
+      }
+
+      const errorMsg = result.errors?.[0]?.message || 'GraphQL mutation failed';
+      console.log('[ReviewPing] GraphQL mutation error:', errorMsg);
+      return { success: false, error: errorMsg };
+    } catch (error) {
+      console.log('[ReviewPing] GraphQL error:', error);
+      return { success: false, error: error.message };
+    }
+  }
+
+  // GraphQL로 PR node ID 조회 (세션 기반)
+  async function getPRNodeIdViaGraphQL(owner, repo, prNumber) {
+    try {
+      const response = await fetch('https://github.com/graphql', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json'
+        },
+        credentials: 'include',
+        body: JSON.stringify({
+          query: `
+            query GetPRNodeId($owner: String!, $repo: String!, $number: Int!) {
+              repository(owner: $owner, name: $repo) {
+                pullRequest(number: $number) {
+                  id
+                }
+              }
+            }
+          `,
+          variables: {
+            owner: owner,
+            repo: repo,
+            number: parseInt(prNumber, 10)
+          }
+        })
+      });
+
+      const result = await response.json();
+      console.log('[ReviewPing] GraphQL PR query response:', result);
+
+      if (result.data?.repository?.pullRequest?.id) {
+        return result.data.repository.pullRequest.id;
+      }
+
+      console.log('[ReviewPing] Could not get PR node ID from GraphQL:', result.errors);
+      return null;
+    } catch (error) {
+      console.log('[ReviewPing] GraphQL PR query error:', error);
+      return null;
+    }
+  }
+
+  // 사용자의 node ID 가져오기 (GitHub public API)
+  async function getUserNodeId(username) {
+    try {
+      const response = await fetch(`https://api.github.com/users/${username}`, {
+        headers: { 'Accept': 'application/vnd.github.v3+json' }
+      });
+      if (response.ok) {
+        const data = await response.json();
+        console.log('[ReviewPing] Got user node ID for', username, ':', data.node_id);
+        return data.node_id;
+      }
+    } catch (e) {
+      console.log('[ReviewPing] Error getting user node ID:', e);
+    }
+    return null;
+  }
+
+  // DOM 클릭 기반 리뷰어 추가 시도
+  async function tryClickBasedReviewerAdd(reviewers) {
+    console.log('[ReviewPing] Trying click-based reviewer add for:', reviewers);
+
+    // 사이드바에서 Reviewers 섹션 찾기
+    let reviewersSection = null;
+    let detailsElement = null;
+
+    // 방법 1: details 요소 중 Reviewers 관련 찾기
+    const allDetails = document.querySelectorAll('.Layout-sidebar details, .discussion-sidebar details, [class*="sidebar"] details');
+    for (const details of allDetails) {
+      const text = details.textContent || '';
+      if (text.includes('Reviewers') || text.includes('리뷰어')) {
+        detailsElement = details;
+        reviewersSection = details;
+        console.log('[ReviewPing] Found Reviewers details element');
+        break;
+      }
+    }
+
+    // 방법 2: 사이드바 아이템에서 찾기
+    if (!reviewersSection) {
+      const sidebarSelectors = [
+        '.Layout-sidebar .discussion-sidebar-item',
+        '.discussion-sidebar-item',
+        '[data-testid="sidebar-reviewers"]',
+        '.js-discussion-sidebar-item',
+        '#partial-discussion-sidebar .js-issue-sidebar-form'
+      ];
+
+      for (const selector of sidebarSelectors) {
+        const items = document.querySelectorAll(selector);
+        for (const item of items) {
+          const labelText = item.textContent || '';
+          if (labelText.includes('Reviewers') || labelText.includes('리뷰어')) {
+            reviewersSection = item;
+            detailsElement = item.querySelector('details');
+            console.log('[ReviewPing] Found Reviewers section with:', selector);
+            break;
+          }
+        }
+        if (reviewersSection) break;
+      }
+    }
+
+    if (!reviewersSection) {
+      console.log('[ReviewPing] Reviewers section not found in sidebar');
+      return { success: false, error: 'Reviewers 섹션을 찾을 수 없습니다' };
+    }
+
+    // 톱니바퀴/summary 버튼 찾기
+    let gearButton = reviewersSection.querySelector('summary') ||
+                     reviewersSection.querySelector('[aria-label*="reviewer" i]') ||
+                     reviewersSection.querySelector('.octicon-gear')?.closest('summary, button');
+
+    if (!gearButton && detailsElement) {
+      gearButton = detailsElement.querySelector('summary');
+    }
+
+    if (!gearButton) {
+      console.log('[ReviewPing] Gear button not found');
+      return { success: false, error: 'Reviewers 설정 버튼을 찾을 수 없습니다' };
+    }
+
+    // 메뉴 열기
+    console.log('[ReviewPing] Opening reviewer menu...');
+    gearButton.click();
+    await new Promise(r => setTimeout(r, 800));
+
+    // details가 열렸는지 확인
+    if (detailsElement && !detailsElement.hasAttribute('open')) {
+      detailsElement.setAttribute('open', '');
+      await new Promise(r => setTimeout(r, 500));
+    }
+
+    let addedCount = 0;
+
+    for (const reviewer of reviewers) {
+      console.log('[ReviewPing] Processing reviewer:', reviewer);
+
+      // 검색 input 찾기 (있으면 검색 수행)
+      const searchInput = document.querySelector(
+        'details[open] input[type="text"], ' +
+        'details[open] input[placeholder*="Filter"], ' +
+        'details[open] input[placeholder*="Search"], ' +
+        'details[open] input[aria-label*="Filter"], ' +
+        '.SelectMenu-input, ' +
+        '[data-filterable-for] input'
       );
 
-      if (response.ok) {
-        console.log('[ReviewPing] Reviewers added via session:', validUsers.map(u => u.username));
-        return { success: true, addedReviewers: validUsers.map(u => u.username) };
-      } else {
-        console.error('[ReviewPing] Failed to add reviewers:', response.status);
-        return { success: false, error: `요청 실패 (${response.status})` };
+      if (searchInput) {
+        console.log('[ReviewPing] Found search input, searching for:', reviewer);
+        searchInput.value = reviewer;
+        searchInput.dispatchEvent(new Event('input', { bubbles: true }));
+        searchInput.dispatchEvent(new Event('change', { bubbles: true }));
+        await new Promise(r => setTimeout(r, 500));
       }
-    } catch (error) {
-      console.error('[ReviewPing] Error adding reviewers via session:', error);
-      return { success: false, error: '네트워크 오류' };
+
+      // 열린 메뉴에서 리뷰어 찾기
+      const menuContainer = document.querySelector('details[open]') || detailsElement || document;
+
+      // 다양한 방법으로 리뷰어 아이템 찾기
+      let reviewerItem = null;
+
+      // 1. data-login 속성으로 찾기
+      reviewerItem = menuContainer.querySelector(`[data-login="${reviewer}"]`) ||
+                     menuContainer.querySelector(`[data-login="${reviewer.toLowerCase()}"]`) ||
+                     document.querySelector(`details[open] [data-login="${reviewer}"]`);
+
+      // 2. input value로 찾기
+      if (!reviewerItem) {
+        const input = menuContainer.querySelector(`input[value="${reviewer}"], input[value="${reviewer.toLowerCase()}"]`) ||
+                     document.querySelector(`details[open] input[value="${reviewer}"]`);
+        if (input) {
+          reviewerItem = input.closest('label, .select-menu-item, .ActionListItem, [role="option"]') || input;
+        }
+      }
+
+      // 3. label 텍스트로 찾기
+      if (!reviewerItem) {
+        const labels = menuContainer.querySelectorAll('label, .select-menu-item, .ActionListItem, [role="menuitemcheckbox"], [role="option"]');
+        for (const label of labels) {
+          const text = (label.textContent || '').trim().toLowerCase();
+          if (text.includes(reviewer.toLowerCase())) {
+            reviewerItem = label;
+            console.log('[ReviewPing] Found reviewer by text in:', label.className || label.tagName);
+            break;
+          }
+        }
+      }
+
+      // 4. 전체 문서에서 열린 드롭다운 내 검색
+      if (!reviewerItem) {
+        const openMenu = document.querySelector('details[open] .SelectMenu-list, details[open] .select-menu-list, details[open] [role="menu"]');
+        if (openMenu) {
+          const items = openMenu.querySelectorAll('label, [role="menuitemcheckbox"], [role="option"], .select-menu-item');
+          for (const item of items) {
+            if ((item.textContent || '').toLowerCase().includes(reviewer.toLowerCase())) {
+              reviewerItem = item;
+              console.log('[ReviewPing] Found in open menu');
+              break;
+            }
+          }
+        }
+      }
+
+      if (reviewerItem) {
+        // 클릭 가능한 요소 찾기
+        const checkbox = reviewerItem.querySelector('input[type="checkbox"]');
+        const clickTarget = checkbox || reviewerItem;
+
+        // 이미 선택되어 있는지 확인
+        const isChecked = checkbox?.checked ||
+                         reviewerItem.classList.contains('selected') ||
+                         reviewerItem.getAttribute('aria-checked') === 'true' ||
+                         reviewerItem.querySelector('.octicon-check');
+
+        if (!isChecked) {
+          console.log('[ReviewPing] Clicking to add reviewer:', reviewer);
+          clickTarget.click();
+          addedCount++;
+          await new Promise(r => setTimeout(r, 500));
+        } else {
+          console.log('[ReviewPing] Reviewer already selected:', reviewer);
+          addedCount++;
+        }
+      } else {
+        console.log('[ReviewPing] Could not find reviewer item for:', reviewer);
+      }
+
+      // 검색 초기화
+      if (searchInput) {
+        searchInput.value = '';
+        searchInput.dispatchEvent(new Event('input', { bubbles: true }));
+        await new Promise(r => setTimeout(r, 300));
+      }
     }
+
+    // 메뉴 닫기
+    await new Promise(r => setTimeout(r, 300));
+    if (detailsElement) {
+      detailsElement.removeAttribute('open');
+    }
+    document.body.click();
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', keyCode: 27, bubbles: true }));
+
+    if (addedCount > 0) {
+      console.log('[ReviewPing] Successfully added reviewers via click:', addedCount);
+      return { success: true, addedReviewers: reviewers.slice(0, addedCount) };
+    }
+
+    return { success: false, error: '리뷰어 목록에서 사용자를 찾을 수 없습니다' };
   }
 
   // 이전 PR 상태 추적 (머지 감지용)
@@ -172,31 +554,67 @@
 
   // PR이 머지되었는지 확인 (엄격한 체크)
   function isMerged() {
-    // PR 헤더의 상태 뱃지만 확인 (다른 곳의 머지 아이콘은 무시)
-    const headerArea = document.querySelector('.gh-header-meta, .gh-header-show');
-    if (!headerArea) return false;
+    // 방법 1: PR 헤더의 상태 뱃지 확인
+    const headerArea = document.querySelector('.gh-header-meta, .gh-header-show, #partial-discussion-header');
 
-    // 헤더 내의 머지 상태만 확인
-    const mergeSelectors = [
-      '.State--merged',                           // 머지된 상태 뱃지
-      '[data-testid="state-label-merged"]',       // 새로운 UI의 머지 라벨
-      '.State--purple'                            // 보라색 상태 뱃지 (머지됨)
-    ];
+    if (headerArea) {
+      // 헤더 내의 머지 상태만 확인
+      const mergeSelectors = [
+        '.State--merged',                           // 머지된 상태 뱃지
+        '[data-testid="state-label-merged"]',       // 새로운 UI의 머지 라벨
+        '.State--purple'                            // 보라색 상태 뱃지 (머지됨)
+      ];
 
-    for (const selector of mergeSelectors) {
-      const el = headerArea.querySelector(selector);
-      if (el) {
-        return true;
+      for (const selector of mergeSelectors) {
+        const el = headerArea.querySelector(selector);
+        if (el) {
+          console.log('[ReviewPing] Merge detected via selector:', selector);
+          return true;
+        }
+      }
+
+      // 헤더 내 텍스트로 확인 (백업 방법)
+      const stateLabels = headerArea.querySelectorAll('.State, [data-testid="state-label"]');
+      for (const label of stateLabels) {
+        const text = label.textContent.trim().toLowerCase();
+        if (text === 'merged') {
+          console.log('[ReviewPing] Merge detected via text label');
+          return true;
+        }
       }
     }
 
-    // 헤더 내 텍스트로 확인 (백업 방법)
-    const stateLabels = headerArea.querySelectorAll('.State, [data-testid="state-label"]');
-    for (const label of stateLabels) {
-      const text = label.textContent.trim().toLowerCase();
-      if (text === 'merged') {
-        return true;
+    // 방법 2: 페이지 전체에서 머지 상태 확인 (GitHub UI 변경 대응)
+    const globalMergeIndicators = [
+      '.merged-status-badge',
+      '[data-testid="merged-badge"]',
+      '.octicon-git-merge.color-fg-done',
+      '.TimelineItem .octicon-git-merge'
+    ];
+
+    for (const selector of globalMergeIndicators) {
+      const el = document.querySelector(selector);
+      if (el) {
+        // 타임라인의 머지 아이콘인 경우, 실제 머지 완료인지 확인
+        const timelineItem = el.closest('.TimelineItem');
+        if (timelineItem) {
+          const text = timelineItem.textContent.toLowerCase();
+          if (text.includes('merged')) {
+            console.log('[ReviewPing] Merge detected via timeline:', selector);
+            return true;
+          }
+        } else {
+          console.log('[ReviewPing] Merge detected via global selector:', selector);
+          return true;
+        }
       }
+    }
+
+    // 방법 3: 머지 메시지 확인
+    const mergeMessage = document.querySelector('.merge-message, [data-testid="merge-message"]');
+    if (mergeMessage && mergeMessage.textContent.toLowerCase().includes('merged')) {
+      console.log('[ReviewPing] Merge detected via merge message');
+      return true;
     }
 
     return false;
@@ -255,12 +673,16 @@
   async function checkMergeState() {
     const currentMergeState = isMerged();
 
+    console.log('[ReviewPing] Checking merge state:', { current: currentMergeState, previous: previousMergeState });
+
     // 머지 상태가 false → true로 변경된 경우에만 알림
     if (currentMergeState && !previousMergeState) {
+      console.log('[ReviewPing] Merge state changed: false → true');
       const prInfo = getPRInfo();
       if (prInfo) {
         // 허용된 저장소인지 확인
         const allowed = await isRepoAllowed(prInfo.owner, prInfo.repo);
+        console.log('[ReviewPing] Repo allowed:', allowed, prInfo.owner + '/' + prInfo.repo);
         if (allowed) {
           await sendMergeNotification(prInfo);
         }
@@ -403,14 +825,74 @@
       return !isBot;
     });
 
-    // 마지막 리뷰 코멘트 가져오기 (리뷰 완료 시 사용)
+    // 현재 사용자의 첫 번째 리뷰 코멘트 가져오기 (리뷰 완료 시 사용)
     let reviewComment = '';
 
-    // 타임라인에서 마지막 리뷰 코멘트 찾기
-    const reviewComments = document.querySelectorAll('.js-timeline-item .review-comment .comment-body, .js-timeline-item .markdown-body.comment-body');
-    if (reviewComments.length > 0) {
-      const lastComment = reviewComments[reviewComments.length - 1];
-      reviewComment = lastComment.textContent.trim();
+    // 무시할 텍스트 패턴 (빈 상태 메시지)
+    const ignoredPatterns = [
+      /^nothing to preview/i,
+      /^no content/i,
+      /^preview.*loading/i,
+      /^\s*$/
+    ];
+
+    // 1차: 현재 사용자의 리뷰 이벤트에서 메인 리뷰 본문 찾기 (첫 번째부터)
+    // 리뷰 이벤트는 "requested changes", "approved", "commented" 등의 액션이 있는 타임라인 아이템
+    const reviewEvents = document.querySelectorAll('.js-timeline-item');
+    for (let i = 0; i < reviewEvents.length; i++) {
+      const event = reviewEvents[i];
+
+      // 리뷰 이벤트인지 확인 (review-body가 있는 경우)
+      const reviewBody = event.querySelector('.review-body');
+      if (!reviewBody) continue;
+
+      // 현재 사용자의 리뷰인지 확인
+      const authorEl = event.querySelector('.author, [data-hovercard-type="user"]');
+      if (authorEl) {
+        const reviewAuthor = authorEl.textContent.trim().toLowerCase();
+        if (currentUser && reviewAuthor !== currentUser.toLowerCase()) {
+          continue; // 다른 사용자의 리뷰는 스킵
+        }
+      }
+
+      // 메인 리뷰 본문 추출 (코드 코멘트 제외)
+      const commentBody = reviewBody.querySelector('.comment-body, .markdown-body');
+      if (commentBody) {
+        const text = commentBody.textContent.trim();
+        const isIgnored = ignoredPatterns.some(pattern => pattern.test(text));
+        if (text && !isIgnored) {
+          reviewComment = text;
+          console.log('[ReviewPing] Found first review comment from current user');
+          break;
+        }
+      }
+    }
+
+    // 2차: 메인 리뷰 본문을 못 찾은 경우 폴백 (기존 로직)
+    if (!reviewComment) {
+      const fallbackSelectors = [
+        // 리뷰 요약 코멘트 (리뷰 제출 시 남기는 코멘트)
+        '.js-timeline-item .review-body .comment-body',
+        '.js-timeline-item .review-body .markdown-body',
+        '[data-testid="review-body"] .markdown-body'
+      ];
+
+      for (const selector of fallbackSelectors) {
+        const elements = document.querySelectorAll(selector);
+        if (elements.length > 0) {
+          // 앞에서부터 찾기 (첫 번째 코멘트)
+          for (let i = 0; i < elements.length; i++) {
+            const text = elements[i].textContent.trim();
+            // 빈 상태 메시지 필터링
+            const isIgnored = ignoredPatterns.some(pattern => pattern.test(text));
+            if (text && !isIgnored) {
+              reviewComment = text;
+              break;
+            }
+          }
+          if (reviewComment) break;
+        }
+      }
     }
 
     console.log('[ReviewPing] PR Info:', { owner, repo, prNumber, title, author, currentUser, reviewers, reviewComment: reviewComment.substring(0, 50) });
@@ -655,10 +1137,26 @@
     let selectedReviewers = hasReviewers ? [...reviewers] : [];
 
     // GitHub 리뷰어 추가 설정 가져오기
-    const settings = await chrome.storage.sync.get({ autoAddReviewers: true });
-    // 세션 기반 방식은 항상 사용 가능 (로그인 되어있으면)
-    const isLoggedIn = !!document.querySelector('meta[name="user-login"]')?.getAttribute('content');
-    let addToGithub = isLoggedIn && settings.autoAddReviewers;
+    const settings = await chrome.storage.sync.get({ autoAddReviewers: true, githubToken: '' });
+    const hasGithubToken = !!settings.githubToken;
+    // 로그인 여부 확인 (여러 방법 시도)
+    const userLoginMeta = document.querySelector('meta[name="user-login"]')?.getAttribute('content');
+    const userLoginFromHeader = document.querySelector('.Header-link.name, [data-login]')?.getAttribute('data-login');
+    const isLoggedIn = !!(userLoginMeta || userLoginFromHeader || prInfo.currentUser);
+    // 리뷰어 추가 기본값: 항상 true (체크박스로 사용자가 제어)
+    let addToGithub = settings.autoAddReviewers;
+
+    console.log('[ReviewPing] Modal settings:', {
+      hasGithubToken,
+      isLoggedIn,
+      addToGithub,
+      hasReviewers,
+      historyReviewers: historyReviewers.length,
+      timelineReviewers: timelineReviewers.length,
+      currentUser: prInfo.currentUser,
+      userLoginMeta,
+      userLoginFromHeader
+    });
 
     const modal = document.createElement('div');
     modal.id = 'reviewping-modal';
@@ -723,13 +1221,16 @@
       ? `<p style="color: #d29922; font-size: 13px;">리뷰어가 지정되지 않았습니다. "팀원분들"에게 요청됩니다.</p>`
       : '';
 
-    // GitHub에 리뷰어 추가 체크박스 (로그인 되어있고, 히스토리/타임라인에서 선택 가능한 경우만)
-    const showGithubCheckbox = isLoggedIn && !hasReviewers && (historyReviewers.length > 0 || timelineReviewers.length > 0);
+    // GitHub에 리뷰어 추가 체크박스 (기존 리뷰어가 없고, 히스토리/타임라인에서 선택 가능한 경우)
+    const showGithubCheckbox = !hasReviewers && (historyReviewers.length > 0 || timelineReviewers.length > 0);
+    const tokenWarning = !hasGithubToken
+      ? `<span style="color: #d29922; font-size: 11px; display: block; margin-top: 4px;">⚠️ GitHub Token을 설정하면 더 안정적으로 작동합니다 (설정 페이지)</span>`
+      : '';
     const githubCheckboxHTML = showGithubCheckbox
       ? `<label class="reviewping-github-checkbox" style="display: flex; align-items: center; gap: 8px; margin-top: 12px; cursor: pointer;">
           <input type="checkbox" id="reviewping-add-to-github" ${addToGithub ? 'checked' : ''} style="width: 16px; height: 16px; cursor: pointer;">
-          <span style="color: #8b949e; font-size: 13px;">GitHub PR에도 리뷰어 추가</span>
-        </label>`
+          <span style="color: #c9d1d9; font-size: 13px;">GitHub PR에도 리뷰어 추가</span>
+        </label>${tokenWarning}`
       : '';
 
     const modalContent = document.createElement('div');
@@ -836,6 +1337,15 @@
       });
     });
 
+    // GitHub 리뷰어 추가 체크박스 이벤트
+    const githubCheckbox = document.getElementById('reviewping-add-to-github');
+    if (githubCheckbox) {
+      githubCheckbox.addEventListener('change', (e) => {
+        addToGithub = e.target.checked;
+        console.log('[ReviewPing] addToGithub changed:', addToGithub);
+      });
+    }
+
     // 취소 버튼
     document.getElementById('reviewping-modal-cancel').addEventListener('click', () => {
       modal.remove();
@@ -857,31 +1367,89 @@
 
     // 확인 버튼
     document.getElementById('reviewping-modal-confirm').addEventListener('click', async () => {
-      // GitHub 체크박스 상태 확인
-      const githubCheckbox = document.getElementById('reviewping-add-to-github');
-      const shouldAddToGithub = githubCheckbox && githubCheckbox.checked;
-
       modal.remove();
 
-      // GitHub에 리뷰어 추가 (세션 기반 - 히스토리/타임라인에서 선택한 경우만)
-      if (shouldAddToGithub && selectedReviewers.length > 0 && !hasReviewers) {
-        try {
-          const result = await addReviewersViaSession(prInfo, selectedReviewers);
+      // 선택된 리뷰어가 있고, 기존에 리뷰어가 없었으면 GitHub에 추가 시도
+      let githubReviewersAdded = false;
 
-          if (result.success) {
-            console.log('[ReviewPing] GitHub reviewers added via session:', result.addedReviewers);
-          } else {
-            console.warn('[ReviewPing] Failed to add GitHub reviewers:', result.error);
-            // GitHub 추가 실패해도 Slack 알림은 계속 진행
-          }
-        } catch (error) {
-          console.error('[ReviewPing] Error adding GitHub reviewers:', error);
-        }
+      // 조건 체크 및 디버깅
+      const canAddReviewers = selectedReviewers.length > 0;
+      const noExistingReviewers = !hasReviewers;
+      const githubAddEnabled = addToGithub;
+
+      console.log('[ReviewPing] Confirm clicked:', {
+        selectedReviewers,
+        hasReviewers,
+        isLoggedIn,
+        addToGithub,
+        canAddReviewers,
+        noExistingReviewers,
+        githubAddEnabled,
+        showGithubCheckbox
+      });
+
+      // 디버그: 현재 상태 표시
+      console.log('[ReviewPing] Debug state:', {
+        selectedReviewers,
+        canAddReviewers,
+        noExistingReviewers,
+        githubAddEnabled,
+        showGithubCheckbox
+      });
+
+      // 리뷰어를 선택하지 않은 경우 - Slack 알림만 전송 (팀원분들에게)
+      if (!canAddReviewers) {
+        console.log('[ReviewPing] No reviewers selected, sending to team');
+        showToast('리뷰어 미선택 - 팀원분들에게 전송', 'success');
+        const updatedPrInfo = { ...prInfo, reviewers: [], githubReviewersAdded: false };
+        onConfirm(updatedPrInfo);
+        return;
       }
 
-      // 선택된 리뷰어로 prInfo 업데이트
-      const updatedPrInfo = { ...prInfo, reviewers: selectedReviewers };
+      // 기존 리뷰어가 있는 경우 - GitHub 추가 없이 Slack만 전송
+      if (!noExistingReviewers) {
+        console.log('[ReviewPing] Existing reviewers found, skipping GitHub add');
+        showToast('기존 리뷰어 있음 - Slack만 전송', 'success');
+        const updatedPrInfo = { ...prInfo, reviewers: selectedReviewers, githubReviewersAdded: false };
+        onConfirm(updatedPrInfo);
+        return;
+      }
+
+      // 선택된 리뷰어가 있고, 기존 리뷰어가 없는 경우 - GitHub 추가 시도
+      if (githubAddEnabled) {
+        showToast(`GitHub 리뷰어 추가 중: ${selectedReviewers.join(', ')}`, 'success');
+
+        try {
+          console.log('[ReviewPing] Calling addReviewersViaSession with:', selectedReviewers);
+          const result = await addReviewersViaSession(prInfo, selectedReviewers);
+          console.log('[ReviewPing] addReviewersViaSession result:', result);
+
+          if (result.success) {
+            githubReviewersAdded = true;
+            showToast(`GitHub 리뷰어 추가 완료!`, 'success');
+          } else {
+            console.error('[ReviewPing] GitHub reviewer add failed:', result.error);
+            showToast(`GitHub 리뷰어 추가 실패: ${result.error}`, 'error');
+          }
+        } catch (error) {
+          console.error('[ReviewPing] addReviewersViaSession error:', error);
+          showToast(`오류: ${error.message}`, 'error');
+        }
+      } else {
+        console.log('[ReviewPing] GitHub add disabled - checkbox unchecked or not shown');
+        showToast(`체크박스가 체크되지 않아 GitHub 리뷰어 추가 건너뜀`, 'error');
+      }
+
+      // 선택된 리뷰어로 prInfo 업데이트 후 Slack 알림 전송
+      const updatedPrInfo = { ...prInfo, reviewers: selectedReviewers, githubReviewersAdded };
       onConfirm(updatedPrInfo);
+
+      // GitHub 리뷰어 추가 성공 시 페이지 새로고침
+      if (githubReviewersAdded) {
+        setTimeout(() => {
+          window.location.reload();
+        }, 1500);
+      }
     });
   }
 
@@ -1013,9 +1581,14 @@
         const reviewerNames = prInfo.reviewers.length > 0
           ? prInfo.reviewers.join(', ')
           : '팀원분들';
-        const successMsg = action === 'request'
+        let successMsg = action === 'request'
           ? `${reviewerNames}님께 리뷰 요청을 보냈습니다`
           : '리뷰 완료 알림을 보냈습니다';
+
+        // GitHub 리뷰어 추가 성공 시 메시지에 추가
+        if (action === 'request' && prInfo.githubReviewersAdded) {
+          successMsg += ' (GitHub 리뷰어 등록됨)';
+        }
         showToast(successMsg, 'success');
 
         // 리뷰 요청 성공 시 리뷰어 히스토리 저장

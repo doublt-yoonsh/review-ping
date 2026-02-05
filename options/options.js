@@ -40,6 +40,8 @@ const elements = {
   addChannelMapping: document.getElementById('addChannelMapping'),
   // GitHub 관련
   autoAddReviewers: document.getElementById('autoAddReviewers'),
+  githubToken: document.getElementById('githubToken'),
+  toggleGithubToken: document.getElementById('toggleGithubToken'),
   // 템플릿 관련
   requestTemplate: document.getElementById('requestTemplate'),
   completeTemplate: document.getElementById('completeTemplate'),
@@ -352,6 +354,7 @@ async function loadSettings() {
     webhookUrl: '',
     channelMappings: [],
     autoAddReviewers: true,
+    githubToken: '',
     requestTemplate: DEFAULT_TEMPLATES.request,
     completeTemplate: DEFAULT_TEMPLATES.complete,
     mergeTemplate: DEFAULT_TEMPLATES.merge,
@@ -400,6 +403,7 @@ async function loadSettings() {
   elements.channelId.value = settings.channelId || '';
   elements.webhookUrl.value = settings.webhookUrl || '';
   elements.autoAddReviewers.checked = settings.autoAddReviewers !== false;
+  elements.githubToken.value = settings.githubToken || '';
   elements.requestTemplate.value = settings.requestTemplate || DEFAULT_TEMPLATES.request;
   elements.completeTemplate.value = settings.completeTemplate || DEFAULT_TEMPLATES.complete;
   elements.mergeTemplate.value = settings.mergeTemplate || DEFAULT_TEMPLATES.merge;
@@ -652,6 +656,7 @@ async function saveSettings() {
     webhookUrl: elements.webhookUrl.value.trim(),
     channelMappings: collectChannelMappings(),
     autoAddReviewers: elements.autoAddReviewers.checked,
+    githubToken: elements.githubToken.value.trim(),
     requestTemplate: elements.requestTemplate.value || DEFAULT_TEMPLATES.request,
     completeTemplate: elements.completeTemplate.value || DEFAULT_TEMPLATES.complete,
     mergeTemplate: elements.mergeTemplate.value || DEFAULT_TEMPLATES.merge,
@@ -992,9 +997,27 @@ elements.resetBotToken.addEventListener('click', async () => {
   elements.botToken.focus();
 });
 
+// GitHub 토큰 토글
+function toggleGithubTokenVisibility() {
+  const input = elements.githubToken;
+  const eyeIcon = elements.toggleGithubToken.querySelector('.icon-eye');
+  const eyeOffIcon = elements.toggleGithubToken.querySelector('.icon-eye-off');
+
+  if (input.type === 'password') {
+    input.type = 'text';
+    eyeIcon.style.display = 'none';
+    eyeOffIcon.style.display = 'block';
+  } else {
+    input.type = 'password';
+    eyeIcon.style.display = 'block';
+    eyeOffIcon.style.display = 'none';
+  }
+}
+
 // 이벤트 리스너
 elements.toggleBotToken.addEventListener('click', toggleBotTokenVisibility);
 elements.toggleWebhookUrl.addEventListener('click', toggleWebhookUrlVisibility);
+elements.toggleGithubToken.addEventListener('click', toggleGithubTokenVisibility);
 elements.testConnection.addEventListener('click', testConnection);
 elements.testWebhook.addEventListener('click', testWebhookConnection);
 elements.saveSettings.addEventListener('click', saveSettings);
